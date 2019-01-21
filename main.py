@@ -5,6 +5,7 @@ import time
 from copy import deepcopy
 from pathlib import Path
 
+
 import numpy as np
 if sys.platform == 'win32':
     import numpy.core._dtype_ctypes #don't remove this line, pyinstaller need this
@@ -16,7 +17,7 @@ from PySide2.QtCore import QItemSelectionModel
 from PySide2.QtCore import QRect
 from PySide2.QtCore import QSize
 from PySide2.QtCore import Qt
-from PySide2.QtGui import QColor, QIntValidator
+from PySide2.QtGui import QColor, QIntValidator, QBrush, QFont
 from PySide2.QtGui import QStandardItemModel
 from PySide2.QtGui import QStandardItem
 from PySide2.QtGui import QPixmap
@@ -120,18 +121,15 @@ class DragButton(QToolButton):
         ''')
 
         self.setFixedSize(10, 10)
-        self.border_size = self.parent().size()
+        self.border_range = self.parent().size()
 
     def mousePressEvent(self, event):
-        self.setStyleSheet('''
-            background-color: yellow;
-        ''')
-        self.__mousePressPos = None
-        self.__mouseMovePos = None
         if event.button() == QtCore.Qt.LeftButton:
+            self.setStyleSheet('''
+                background-color: yellow;
+            ''')
             self.__mousePressPos = event.globalPos()
             self.__mouseMovePos = event.globalPos()
-        super(DragButton, self).mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         if event.buttons() == QtCore.Qt.LeftButton:
@@ -142,15 +140,18 @@ class DragButton(QToolButton):
 
             center_point = [newPos.x() + self.width() / 2,
                             newPos.y() + self.height() / 2]
-            if center_point[0] > self.border_size.width()-10:
-                center_point[0] = self.border_size.width()-10
-            if center_point[0] < 10:
-                center_point[0] = 10
 
-            if center_point[1] > self.border_size.height()-10:
-                center_point[1] = self.border_size.height()-10
-            if center_point[1] < 10:
-                center_point[1] = 10
+            if center_point[0] > self.border_range[0][1]:
+                center_point[0] = self.border_range[0][1]
+
+            if center_point[0] < self.border_range[0][0]:
+                center_point[0] = self.border_range[0][0]
+
+            if center_point[1] > self.border_range[1][1]:
+                center_point[1] = self.border_range[1][1]
+
+            if center_point[1] < self.border_range[1][0]:
+                center_point[1] = self.border_range[1][0]
 
             self.move(QPoint(
                 center_point[0] - self.width() / 2,
@@ -159,18 +160,15 @@ class DragButton(QToolButton):
             self.__mouseMovePos = globalPos
             self.parent().update_points()
 
-        super(DragButton, self).mouseMoveEvent(event)
-
     def mouseReleaseEvent(self, event):
-        self.setStyleSheet('''
-            background-color: red;
-        ''')
         if self.__mousePressPos is not None:
             moved = event.globalPos() - self.__mousePressPos
             if moved.manhattanLength() > 3:
+                self.setStyleSheet('''
+                    background-color: red;
+                ''')
                 event.ignore()
-                return
-        super(DragButton, self).mouseReleaseEvent(event)
+
 
     def resizeEvent(self, event):
         self.setMask(QRegion(self.rect(), QRegion.Ellipse))
@@ -180,40 +178,120 @@ class ImageLabel(QLabel):
     def __init__(self, parent):
         super(ImageLabel, self).__init__(parent)
 
-        self.img_extra_border_size = (50, 50)
+        self.img_extra_border_size = (5, 5)
         self.scaled_img = None
         self.scaled_ratio = None
         self.scaled_img_rect = None
         self.img_all_text = None
+        self.img_all_text_dict = {}
         self.img_activate_idx = None
+
+        self.mouse_mark_flag = False
+        self.mouse_start_pos = None
+        self.mouse_end_pos = None
 
         self.btn_point1 = DragButton(self)
         self.btn_point2 = DragButton(self)
         self.btn_point3 = DragButton(self)
         self.btn_point4 = DragButton(self)
 
+        self.lineedit_input = QLineEdit(self)
+        self.lineedit_input.setFont(QFont('宋体',22))
+        self.lineedit_input.setFixedWidth(500)
+        self.lineedit_input.textChanged.connect(self.on_text_change)
+
         self.btn_point1.setVisible(False)
         self.btn_point2.setVisible(False)
         self.btn_point3.setVisible(False)
         self.btn_point4.setVisible(False)
+        self.lineedit_input.setVisible(False)
+
+    def mousePressEvent(self, event):
+        if self.scaled_img is None:
+            return
+
+        if event.button() == QtCore.Qt.LeftButton:
+            self.mouse_mark_flag = True
+            self.mouse_start_pos = event.pos()
+            self.mouse_end_pos = event.pos()
+            self.update()
+
+    def mouseMoveEvent(self, event):
+        if self.scaled_img is None or not self.mouse_mark_flag:
+            return
+
+        self.mouse_end_pos = event.pos()
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        if self.scaled_img is None or not self.mouse_mark_flag:
+            return
+
+        if event.button() == QtCore.Qt.LeftButton:
+            self.mouse_end_pos = event.pos()
+
+            if abs(self.mouse_start_pos.x() - self.mouse_end_pos.x()) < 5 or \
+                    abs(self.mouse_start_pos.y() - self.mouse_end_pos.y()) < 5:
+                self.mouse_mark_flag = False
+                self.mouse_start_pos = None
+                self.mouse_end_pos = None
+                return
+
+            p1 = [self.mouse_start_pos.x(), self.mouse_start_pos.y()]
+            p2 = [self.mouse_end_pos.x(), self.mouse_end_pos.y()]
+            p3 = [p1[0], p2[1]]
+            p4 = [p2[0], p1[1]]
+            point_list = np.array([p1,p2,p3,p4])
+            point_list = order_points(point_list)
+
+            point_list[:, 0] -= self.img_extra_border_size[1]
+            point_list[:, 1] -= self.img_extra_border_size[0]
+            point_list = point_list.astype(np.float)
+            point_list /= self.scaled_ratio
+            point_list = point_list.astype(np.int)
+            point_list += 1
+
+            self.parent().add_text(point_list)
+
+    def on_text_change(self):
+        if self.scaled_img is None:
+            return
+
+        if self.img_activate_idx is None:
+            return
+
+        new_text = self.lineedit_input.text()
+        if self.img_all_text_dict[self.img_activate_idx] != new_text:
+            self.parent().on_imglabel_text_change(self.img_activate_idx, new_text)
 
     def show_activate_img(self, img, all_text, activate_idx):
         self.scaled_img = None
         self.scaled_ratio = None
         self.scaled_img_rect = None
         self.img_all_text = []
+        self.img_all_text_dict = {}
         self.img_activate_idx = None
+        self.mouse_mark_flag = False
+        self.mouse_start_pos = None
+        self.mouse_end_pos = None
 
         self.btn_point1.setVisible(False)
         self.btn_point2.setVisible(False)
         self.btn_point3.setVisible(False)
         self.btn_point4.setVisible(False)
+        self.lineedit_input.setVisible(False)
+        self.lineedit_input.clear()
 
         if img:
+            # scaled_size = QSize(
+            #     self.size().width()-self.img_extra_border_size[1]*2,
+            #     self.size().height()-self.img_extra_border_size[0]*2
+            # )
             scaled_size = QSize(
-                self.size().width()-self.img_extra_border_size[1]*2,
-                self.size().height()-self.img_extra_border_size[0]*2
+                img.width(),
+                img.height()
             )
+
             self.scaled_img = img.scaled(scaled_size, Qt.KeepAspectRatio)
 
             self.scaled_ratio = self.scaled_img.width() / img.width()
@@ -223,6 +301,11 @@ class ImageLabel(QLabel):
                 self.img_extra_border_size[1],
                 self.scaled_img.width(),
                 self.scaled_img.height()
+            )
+
+            self.mouse_border_range = (
+                (self.scaled_img_rect.x(), self.scaled_img_rect.x()+self.scaled_img_rect.width()),
+                (self.scaled_img_rect.y(), self.scaled_img_rect.y()+self.scaled_img_rect.height()),
             )
 
             self.img_activate_idx = activate_idx
@@ -246,6 +329,7 @@ class ImageLabel(QLabel):
                         p[1] = self.size().height()-10
 
                 self.img_all_text.append([idx, point_list, img_text])
+                self.img_all_text_dict[idx] = img_text
 
                 if activate_idx == idx:
                     self.btn_point1.move(QPoint(point_list[0, 0], point_list[0, 1]))
@@ -258,10 +342,18 @@ class ImageLabel(QLabel):
                     self.btn_point3.setVisible(True)
                     self.btn_point4.setVisible(True)
 
-                    self.btn_point1.border_size = self.size()
-                    self.btn_point2.border_size = self.size()
-                    self.btn_point3.border_size = self.size()
-                    self.btn_point4.border_size = self.size()
+                    self.btn_point1.border_range = (
+                        (self.scaled_img_rect.x(), self.scaled_img_rect.x()+self.scaled_img_rect.width()),
+                        (self.scaled_img_rect.y(), self.scaled_img_rect.y()+self.scaled_img_rect.height()),
+                    )
+                    self.btn_point2.border_range = self.btn_point1.border_range
+                    self.btn_point3.border_range = self.btn_point1.border_range
+                    self.btn_point4.border_range = self.btn_point1.border_range
+
+                    self.lineedit_input.setVisible(True)
+                    self.lineedit_input.setFocus()
+                    self.lineedit_input.move(self.btn_point4.pos().x(), self.btn_point4.pos().y()+10)
+                    self.lineedit_input.setText(img_text)
 
         self.repaint()
 
@@ -278,6 +370,8 @@ class ImageLabel(QLabel):
                                (pos3.x(), pos3.y()),
                                (pos4.x(), pos4.y())])
         point_list = order_points(point_list)
+
+        self.lineedit_input.move(point_list[3][0], point_list[3][1]+10)
 
         for idx, (id, _, _) in enumerate(self.img_all_text):
             if id != self.img_activate_idx:
@@ -337,6 +431,10 @@ class ImageLabel(QLabel):
                     point_list[0, 1]
                 )
 
+        if self.mouse_mark_flag:
+            painter.setPen(QPen(Qt.red, 1))
+            painter.drawRect(QtCore.QRect(self.mouse_start_pos, self.mouse_end_pos))
+
         painter.end()
 
 
@@ -354,30 +452,42 @@ class TextTableView(QTableView):
 
         self.all_text_dict = {}
 
+        self.show_activate_img_flag = False
+
     def show_activate_img(self, all_text, activate_idx):
-        self.all_text_dict = {}
-        self.model.clear()
-        self.model.setHorizontalHeaderLabels(['文本', '编号'])
+        self.show_activate_img_flag = True
+        try:
+            self.all_text_dict = {}
+            self.model.clear()
+            self.model.setHorizontalHeaderLabels(['文本', '编号'])
 
-        self.setAutoScroll(True)
-        self.setColumnWidth(0, 300)
-        self.setColumnWidth(1, 0)
-        self.setSelectionMode(QTableView.SingleSelection)
-        for col_id, (idx, point_list, img_text) in enumerate(all_text):
-            self.all_text_dict[idx] = img_text
+            self.setAutoScroll(True)
+            self.setColumnWidth(0, 300)
+            self.setColumnWidth(1, 0)
+            self.setSelectionMode(QTableView.SingleSelection)
+            for col_id, (idx, point_list, img_text) in enumerate(all_text):
+                self.all_text_dict[idx] = img_text
 
-            it1 = QStandardItem(img_text)
-            it1.setEditable(True)
-            self.model.setItem(col_id, 0, it1)
+                it1 = QStandardItem(img_text)
+                it1.setEditable(True)
+                self.model.setItem(col_id, 0, it1)
 
-            it2 = QStandardItem(str(idx))
-            it2.setEditable(False)
-            self.model.setItem(col_id, 1, it2)
+                it2 = QStandardItem(str(idx))
+                it2.setEditable(False)
+                self.model.setItem(col_id, 1, it2)
 
-            if activate_idx == idx:
-                self.selectionModel().select(self.model.index(col_id, 0), QItemSelectionModel.ClearAndSelect|QItemSelectionModel.Rows)
+                if activate_idx == idx:
+                    self.selectionModel().select(
+                        self.model.index(col_id, 0),
+                        QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows
+                    )
+        finally:
+            self.show_activate_img_flag = False
 
     def on_select_change(self):
+        if self.show_activate_img_flag:
+            return
+
         select_row_indexs = self.selectionModel().selectedIndexes()
         if not select_row_indexs:
             return
@@ -405,7 +515,7 @@ class TextTableView(QTableView):
         if activate_idx is not None:
             activate_idx = int(activate_idx)
             if self.all_text_dict[activate_idx] != new_text:
-                self.parent().on_text_change(activate_idx, new_text)
+                self.parent().on_tableview_text_change(activate_idx, new_text)
 
 class MainWindow(QWidget):
     def __init__(self, parent=None):
@@ -464,13 +574,18 @@ class MainWindow(QWidget):
             self.btn_next_img.click
         )
 
-        self.btn_new_text = QPushButton(self)
-        self.btn_new_text.setText('新增')
-        self.btn_new_text.clicked.connect(self.on_add_text)
-
         self.btn_del_text = QPushButton(self)
         self.btn_del_text.setText('删除')
         self.btn_del_text.clicked.connect(self.on_del_text)
+
+        self.btn_nonactivate = QPushButton(self)
+        self.btn_nonactivate.setText('不选')
+        self.btn_nonactivate.clicked.connect(self.on_nonactivate)
+        self.connect(
+            QShortcut(QKeySequence(Qt.Key_Escape), self),
+            QtCore.SIGNAL('activated()'),
+            self.btn_nonactivate.click
+        )
 
         self.tableview_text = TextTableView(self)
 
@@ -499,8 +614,8 @@ class MainWindow(QWidget):
         layout_col2_row2.addWidget(self.btn_next_img)
 
         layout_col2_row3 = QHBoxLayout()
-        layout_col2_row3.addWidget(self.btn_new_text)
         layout_col2_row3.addWidget(self.btn_del_text)
+        layout_col2_row3.addWidget(self.btn_nonactivate)
 
         layout_col2.addLayout(layout_col2_row1)
         layout_col2.addLayout(layout_col2_row2)
@@ -526,8 +641,8 @@ class MainWindow(QWidget):
             self.label_status_page_number.setEnabled(False)
             self.btn_prev_img.setEnabled(False)
             self.btn_next_img.setEnabled(False)
-            self.btn_new_text.setEnabled(False)
             self.btn_del_text.setEnabled(False)
+            self.btn_nonactivate.setEnabled(False)
 
             if not self.all_img_file:
                 self.label_status_running1.setText('请选择需要标注的目录')
@@ -554,8 +669,8 @@ class MainWindow(QWidget):
                 else:
                     self.btn_next_img.setEnabled(True)
 
-                self.btn_new_text.setEnabled(True)
                 self.btn_del_text.setEnabled(True)
+                self.btn_nonactivate.setEnabled(True)
         except:
             logging.exception('update_btn_status exception')
 
@@ -617,17 +732,12 @@ class MainWindow(QWidget):
         finally:
             self.update_btn_status()
 
-    def on_add_text(self):
+    def add_text(self, point_list):
         try:
             if not self.all_img_file:
                 return
 
             img_name = self.all_img_file[self.all_img_file_index]
-            point_list = np.array([(50, 50),
-                                   (self.label_img.width() - 50, 50),
-                                   (self.label_img.width() - 50, self.label_img.height() - 50),
-                                   (50, self.label_img.height() - 50)
-                                   ])
             img_text = ''
             activate_idx = self.db_label.add_text(img_name, point_list, img_text)
             self.show_img(activate_idx)
@@ -641,6 +751,12 @@ class MainWindow(QWidget):
                 img_name = self.all_img_file[self.all_img_file_index]
                 activate_idx = self.db_label.del_text(img_name, img_idx)
                 self.show_img(activate_idx)
+        finally:
+            self.update_btn_status()
+
+    def on_nonactivate(self):
+        try:
+            self.show_img(activate_idx=None)
         finally:
             self.update_btn_status()
 
@@ -666,10 +782,15 @@ class MainWindow(QWidget):
     def on_activate_idx_change(self, activate_idx):
         self.show_img(activate_idx, table_update=False)
 
-    def on_text_change(self, activate_idx, new_text):
+    def on_tableview_text_change(self, activate_idx, new_text):
         img_name = self.all_img_file[self.all_img_file_index]
         self.db_label.update_text(img_name, activate_idx, new_text)
-        self.show_img(activate_idx, table_update=False)
+        self.show_img(activate_idx, img_update=True, table_update=False)
+
+    def on_imglabel_text_change(self, activate_idx, new_text):
+        img_name = self.all_img_file[self.all_img_file_index]
+        self.db_label.update_text(img_name, activate_idx, new_text)
+        self.show_img(activate_idx, img_update=False, table_update=True)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
