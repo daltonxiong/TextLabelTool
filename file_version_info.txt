@@ -33,7 +33,7 @@ VSVersionInfo(
         StringStruct(u'FileDescription', u'文字识别标注工具'),
         StringStruct(u'FileVersion', u'2018.1.21.1 (win7_rtm.090713-1255)'),
         StringStruct(u'InternalName', u'证件边缘标注工具'),
-        StringStruct(u'LegalCopyright', u'© Xiongdonggen. All rights reserved.'),
+        StringStruct(u'LegalCopyright', u'© DaltonXiong. All rights reserved.'),
         StringStruct(u'OriginalFilename', u'文字识别标注工具.EXE'),
         StringStruct(u'ProductName', u'文字识别标注工具'),
         StringStruct(u'ProductVersion', u'2018.1.21.1')])
