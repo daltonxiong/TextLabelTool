@@ -199,6 +199,7 @@ class ImageLabel(QLabel):
         self.lineedit_input.setFont(QFont('宋体',22))
         self.lineedit_input.setFixedWidth(500)
         self.lineedit_input.textChanged.connect(self.on_text_change)
+        self.lineedit_input.returnPressed.connect(self.parent().on_nonactivate)
 
         self.btn_point1.setVisible(False)
         self.btn_point2.setVisible(False)
